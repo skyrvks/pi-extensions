@@ -440,7 +440,7 @@ describe("background bash", () => {
     const logPath = result.details?.fullOutputPath;
 
     expect(resultText(result)).toContain("short-output");
-    expect(resultText(result)).toContain(`Full output: ${logPath}`);
+    expect(resultText(result)).not.toContain("Full output:");
     expect(sanitizedResult(result).result.content[0]).toEqual({
       type: "text",
       text: "short-output",
@@ -659,7 +659,7 @@ describe("background bash", () => {
     }
 
     expect(error?.message).toContain("Command timed out after 1 seconds");
-    expect(error?.message).toContain("Full output:");
+    expect(error?.message).not.toContain("Full output:");
     expect(resultText(await harness.runProcess({ action: "list" }))).toBe(
       "No active background processes.",
     );

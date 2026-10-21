@@ -175,9 +175,11 @@ const addStableLog = (
 ): AgentToolResult<BackgroundBashDetails> => {
   const content = result.content[0];
   const raw = content?.type === "text" ? content.text : "";
-  const text = raw.includes(managed.logPath)
-    ? raw
-    : `${raw.trimEnd()}${raw.trimEnd() ? "\n\n" : ""}Full output: ${managed.logPath}`;
+  const truncated = Boolean(result.details?.truncation?.truncated) || raw.includes("[Showing ");
+  const text =
+    !truncated || raw.includes(managed.logPath)
+      ? raw
+      : `${raw.trimEnd()}${raw.trimEnd() ? "\n\n" : ""}Full output: ${managed.logPath}`;
 
   return {
     ...result,
@@ -278,7 +280,12 @@ class ProcessOutput {
   };
 }
 
-const stableError = (error: Error, managed: ManagedProcess, output: string): Error => {
+const stableError = (
+  error: Error,
+  managed: ManagedProcess,
+  output: string,
+  truncated = false,
+): Error => {
   const errorMessage = error.message.replace(/^\(no output\)\n\n/, "");
   const combined = [output.trimEnd(), errorMessage].filter(Boolean).join("\n\n");
   const terminalRequired =
@@ -288,9 +295,10 @@ const stableError = (error: Error, managed: ManagedProcess, output: string): Err
   const display = terminalRequired
     ? `${combined.trimEnd()}\n\nHint: command may require a terminal (PTY unsupported).`
     : combined;
-  const message = display.includes(managed.logPath)
-    ? display
-    : `${display.trimEnd()}\n\nFull output: ${managed.logPath}`;
+  const message =
+    !truncated || display.includes(managed.logPath)
+      ? display
+      : `${display.trimEnd()}\n\nFull output: ${managed.logPath}`;
   return new Error(message, { cause: error });
 };
 
@@ -312,7 +320,14 @@ const settleCompletion = async ({
   );
 
   if (outcome.error) {
-    return { error: stableError(outcome.error, managed, resultText(captured)) };
+    return {
+      error: stableError(
+        outcome.error,
+        managed,
+        resultText(captured),
+        Boolean(captured.details?.truncation?.truncated),
+      ),
+    };
   }
 
   const result = addStableLog(captured, managed);
