@@ -1,3 +1,4 @@
+import { open } from "node:fs/promises";
 import { StringEnum } from "@earendil-works/pi-ai";
 import {
   createBashToolDefinition,
@@ -53,7 +54,63 @@ export const BashProcessInputSchema = Type.Object({
 export type BashInput = Static<typeof BashInputSchema>;
 export type BashProcessInput = Static<typeof BashProcessInputSchema>;
 
-type RawOutcome = { error?: undefined } | { error: Error };
+/** Output limit of `structuredContent.output`, matching Pi's built-in bash tool. */
+const STRUCTURED_OUTPUT_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Mirrors the built-in bash tool's output schema so codemode scripts receive a structured value
+ * instead of text. `pgid` and `background` are additions for the handoff path.
+ */
+export const BashOutputSchema = Type.Object({
+  output: Type.String({ description: "Command output, possibly truncated" }),
+  truncated: Type.Boolean(),
+  full_output_path: Type.Optional(Type.String({ description: "Complete log file" })),
+  exit_code: Type.Optional(Type.Number()),
+  wall_time_seconds: Type.Optional(Type.Number()),
+  pgid: Type.Optional(Type.Number()),
+  background: Type.Optional(Type.Boolean()),
+});
+
+type BashStructuredOutput = Static<typeof BashOutputSchema>;
+
+type RawOutcome = { error?: undefined; structured?: { exit_code?: unknown } } | { error: Error };
+
+/** Read up to `max` bytes from the end of a log file, matching the built-in bash tool's cap. */
+const readLogTail = async (
+  logPath: string,
+  max: number = STRUCTURED_OUTPUT_MAX_BYTES,
+): Promise<{ text: string; truncated: boolean } | undefined> => {
+  try {
+    const handle = await open(logPath, "r");
+    try {
+      const { size } = await handle.stat();
+      const start = Math.max(0, size - max);
+      const length = size - start;
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, start);
+      return { text: buffer.toString("utf8"), truncated: start > 0 };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return undefined;
+  }
+};
+
+const structuredFor = async (
+  managed: ManagedProcess,
+  exitCode: number | undefined,
+  fallbackText: string,
+): Promise<BashStructuredOutput> => {
+  const tail = await readLogTail(managed.logPath);
+  return {
+    output: tail ? tail.text : fallbackText,
+    truncated: tail ? tail.truncated : false,
+    full_output_path: managed.logPath,
+    exit_code: exitCode,
+    wall_time_seconds: Math.max(0, (Date.now() - managed.startedAt) / 1000),
+  };
+};
 
 const normalizeTimeout = (input: BashInput, options: ResolvedOptions): number =>
   Math.min(input.timeout ?? options.defaultTimeoutSeconds, options.maxTimeoutSeconds);
@@ -235,7 +292,17 @@ const settleCompletion = async ({
 
   const result = addStableLog(captured, managed);
   managed.latest = result;
-  return { result };
+
+  const nativeExit = outcome.structured?.exit_code;
+  const exitCode = typeof nativeExit === "number" ? nativeExit : managed.exitCode;
+  if (exitCode !== undefined) managed.exitCode = exitCode;
+
+  return {
+    result: {
+      ...result,
+      structuredContent: await structuredFor(managed, exitCode, resultText(captured)),
+    },
+  };
 };
 
 const attachAbort = (
@@ -276,6 +343,14 @@ const handoffResult = (
       pgid: managed.pgid,
       active: true,
       fullOutputPath: managed.logPath,
+    },
+    structuredContent: {
+      output: text,
+      truncated: false,
+      full_output_path: managed.logPath,
+      pgid: managed.pgid,
+      background: true,
+      wall_time_seconds: Math.max(0, (Date.now() - managed.startedAt) / 1000),
     },
   };
 };
@@ -403,7 +478,10 @@ const runBash = async ({
       ctx as unknown as ExtensionToolContext,
     )
     .then(
-      () => ({}),
+      (value) => ({
+        structured: (value as { structuredContent?: { exit_code?: unknown } } | undefined)
+          ?.structuredContent,
+      }),
       (error) => ({ error: error instanceof Error ? error : new Error(String(error)) }),
     );
   onUpdate?.({ content: [], details: undefined });
@@ -528,6 +606,7 @@ export const registerTools = (
         : undefined,
     promptGuidelines: options.systemPrompt ? options.systemPromptGuidelines : [],
     parameters: BashInputSchema,
+    outputSchema: BashOutputSchema,
     execute: (toolCallId, input, signal, onUpdate, ctx) =>
       runBash({ toolCallId, pi, ctx, input, signal, onUpdate, manager, options }),
     renderCall(args, theme, context) {
