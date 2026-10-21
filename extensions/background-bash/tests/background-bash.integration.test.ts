@@ -452,6 +452,21 @@ describe("background bash", () => {
     await harness.shutdown();
   });
 
+  it("marks a non-zero exit as an error the way the built-in bash tool does", async () => {
+    const harness = await createHarness();
+    const result = await harness.runBash({
+      command: "printf boom; exit 3",
+      timeout: 3,
+      timeoutAction: "kill",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain("Command exited with code 3");
+    expect(result.structuredContent).toMatchObject({ exit_code: 3 });
+
+    await harness.shutdown();
+  });
+
   it("keeps the session alive when automatic cleanup is denied with EPERM", async () => {
     const exitListenersBefore = process.listeners("exit");
     const harness = await createHarness();

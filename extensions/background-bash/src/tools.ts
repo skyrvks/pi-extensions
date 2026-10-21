@@ -144,6 +144,31 @@ const renderBashCall = ({
 
 const OUTPUT_UPDATE_THROTTLE_MS = 100;
 
+/**
+ * The built-in bash tool marks a non-zero exit as an error and appends a status line, while leaving
+ * the data channel (`structuredContent`) untouched. Match both halves of that contract.
+ */
+const exitStatusLine = (exitCode: number | undefined): string | undefined =>
+  exitCode === undefined || exitCode === 0 ? undefined : `Command exited with code ${exitCode}`;
+
+const withExitStatus = (
+  result: AgentToolResult<BashToolDetails | undefined>,
+  exitCode: number | undefined,
+): AgentToolResult<BashToolDetails | undefined> => {
+  const status = exitStatusLine(exitCode);
+  if (!status) return result;
+  const text = resultText(result);
+  return {
+    ...result,
+    content: [{ type: "text", text: text ? `${text}\n\n${status}` : status }],
+    isError: true,
+  };
+};
+
+/**
+ * Native bash names the log file only when output was truncated; the path stays in `details` so the
+ * renderer can still surface it.
+ */
 const addStableLog = (
   result: AgentToolResult<BashToolDetails | undefined>,
   managed: ManagedProcess,
@@ -299,7 +324,7 @@ const settleCompletion = async ({
 
   return {
     result: {
-      ...result,
+      ...withExitStatus(result, exitCode),
       structuredContent: await structuredFor(managed, exitCode, resultText(captured)),
     },
   };
