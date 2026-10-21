@@ -316,7 +316,7 @@ describe("live event stream", () => {
     writer.append({ type: "agent_start" });
     writer.append({ type: "turn_start", turnIndex: 0, timestamp: 123 });
     await writer.close({ type: "session_shutdown", reason: "quit" });
-    writer.append({ type: "agent_settled" });
+    writer.append({ type: "agent_settled", aborted: false });
 
     expect(writer.filePath).toBe(liveEventStreamPath(rootDir, sessionId, streamId));
     const records = await readRecords(writer.filePath);

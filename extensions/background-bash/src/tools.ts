@@ -7,6 +7,7 @@ import {
   type BashToolDetails,
   type ExtensionAPI,
   type ExtensionContext,
+  type ExtensionToolContext,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { Text, type Component } from "@earendil-works/pi-tui";
@@ -397,7 +398,9 @@ const runBash = async ({
       },
       controller.signal,
       undefined,
-      ctx,
+      // Pi hands tools a context without the nested-tool members; the built-in bash tool only
+      // reads cwd and the UI context, never `tools` or `executeTool`.
+      ctx as unknown as ExtensionToolContext,
     )
     .then(
       () => ({}),

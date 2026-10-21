@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { createBashTool } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
@@ -13,7 +13,12 @@ import {
   type BashToolFactory,
 } from "../src/extension";
 
-const createCtx = (cwd: string): ExtensionContext => ({ cwd }) as ExtensionContext;
+const createCtx = (cwd: string): ExtensionToolContext =>
+  ({
+    cwd,
+    tools: [],
+    executeTool: () => Promise.reject(new Error("executeTool is not used in this test")),
+  }) as unknown as ExtensionToolContext;
 
 const createRecordingFactory = () => {
   const createdCwds: string[] = [];
