@@ -28,7 +28,7 @@ type BashInput = {
 };
 ```
 
-Foreground commands stream and truncate output using Pi's standard 50KB/2000-line behavior. Every command also writes a stable combined stdout/stderr log. The model always receives the path, while the TUI only shows it when output is truncated.
+Foreground commands stream and truncate output using Pi's standard 50KB/2000-line behavior. Every command also writes a stable combined stdout/stderr log. The path is reported to the model and shown in the TUI only when output was truncated; it stays available to extensions as `details.fullOutputPath`.
 
 Commands honor Pi's effective `shellPath` and `shellCommandPrefix` settings, including trusted project overrides.
 
@@ -47,6 +47,16 @@ Call bash with command "pnpm test", timeout 30, and timeoutAction "kill".
 ```
 
 A naturally completed background process sends one follow-up message and wakes the model whether it succeeded or failed. Intentional `bash_process kill` and session shutdown do not send a completion message.
+
+### Results match the built-in `bash` tool
+
+The tool keeps this extension's contract — detached process groups, timeouts that hand off to the background, completion messages — while reporting results the way Pi's built-in `bash` tool does:
+
+- **Structured results.** The tool declares an `outputSchema`, so codemode scripts receive an object (`output`, `exit_code`, `truncated`) instead of text. The built-in tool caps structured output at 1 MiB; this one reads the same cap from the end of the log.
+- **Failures are errors.** A non-zero exit returns `isError: true` with the built-in tool's `Command exited with code N` line, so the model and the TUI both see the failure.
+- **The log path appears only when it matters.** `Full output: <path>` is appended only when output was truncated, matching the built-in tool.
+
+A process handed off to the background has not finished, so its result reports `pgid` and `background: true` and no `exit_code`.
 
 ## `bash_process`
 
